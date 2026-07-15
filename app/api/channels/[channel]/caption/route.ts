@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { ensureLiveChannelsTable, getDb } from "../../../../../db";
 import { liveChannels } from "../../../../../db/schema";
@@ -12,11 +12,15 @@ function validChannel(channel: string) {
 async function getOrCreateChannel(channel: string) {
   await ensureLiveChannelsTable();
   const db = getDb();
-  const now = new Date().toISOString();
+  const existing = await db.query.liveChannels.findFirst({
+    where: eq(liveChannels.channel, channel),
+  });
+
+  if (existing) return existing;
 
   await db
     .insert(liveChannels)
-    .values({ channel, updatedAt: now })
+    .values({ channel, updatedAt: new Date().toISOString() })
     .onConflictDoNothing();
 
   return db.query.liveChannels.findFirst({
@@ -42,11 +46,6 @@ export async function PUT(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Invalid channel." }, { status: 400 });
   }
 
-  const current = await getOrCreateChannel(channel);
-  if (!current) {
-    return NextResponse.json({ error: "Channel unavailable." }, { status: 500 });
-  }
-
   const body = (await request.json()) as {
     sourceText?: unknown;
     translatedText?: unknown;
@@ -54,27 +53,52 @@ export async function PUT(request: Request, context: RouteContext) {
     status?: unknown;
   };
 
-  const next = {
-    sourceText:
-      typeof body.sourceText === "string"
-        ? body.sourceText.slice(-4000)
-        : current.sourceText,
-    translatedText:
-      typeof body.translatedText === "string"
-        ? body.translatedText.slice(-2000)
-        : current.translatedText,
-    visible: typeof body.visible === "boolean" ? body.visible : current.visible,
-    status:
-      typeof body.status === "string" ? body.status.slice(0, 30) : current.status,
-    sequence: current.sequence + 1,
-    updatedAt: new Date().toISOString(),
+  await ensureLiveChannelsTable();
+  const db = getDb();
+  const sourceText =
+    typeof body.sourceText === "string" ? body.sourceText.slice(-4000) : undefined;
+  const translatedText =
+    typeof body.translatedText === "string"
+      ? body.translatedText.slice(-2000)
+      : undefined;
+  const visible = typeof body.visible === "boolean" ? body.visible : undefined;
+  const status =
+    typeof body.status === "string" ? body.status.slice(0, 30) : undefined;
+  const updatedAt = new Date().toISOString();
+
+  const updateSet: {
+    sourceText?: string;
+    translatedText?: string;
+    visible?: boolean;
+    status?: string;
+    sequence: SQL;
+    updatedAt: string;
+  } = {
+    sequence: sql`${liveChannels.sequence} + 1`,
+    updatedAt,
   };
 
-  const db = getDb();
-  await db
-    .update(liveChannels)
-    .set(next)
-    .where(eq(liveChannels.channel, channel));
+  if (sourceText !== undefined) updateSet.sourceText = sourceText;
+  if (translatedText !== undefined) updateSet.translatedText = translatedText;
+  if (visible !== undefined) updateSet.visible = visible;
+  if (status !== undefined) updateSet.status = status;
 
-  return NextResponse.json({ channel, ...next });
+  const [next] = await db
+    .insert(liveChannels)
+    .values({
+      channel,
+      sourceText: sourceText ?? "",
+      translatedText: translatedText ?? "",
+      visible: visible ?? true,
+      status: status ?? "idle",
+      sequence: 1,
+      updatedAt,
+    })
+    .onConflictDoUpdate({
+      target: liveChannels.channel,
+      set: updateSet,
+    })
+    .returning();
+
+  return NextResponse.json(next);
 }

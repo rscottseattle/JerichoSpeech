@@ -10,8 +10,19 @@ const rehearsalLines = [
   "Si esta es su primera vez, queremos que se sientan como en casa.",
 ];
 
-function captionWindow(value: string) {
-  const clean = value.replace(/\s+/g, " ").trim();
+const CAPTION_PUBLISH_INTERVAL_MS = 50;
+const PARTIAL_WORD_FLUSH_MS = 250;
+
+function captionWindow(value: string, includePartialWord = false) {
+  let clean = value.replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+
+  const endsAtWordBoundary = /[\s.,!?;:…\-–—)\]}"'»]$/u.test(value);
+  if (!includePartialWord && !endsAtWordBoundary) {
+    const lastSpace = clean.lastIndexOf(" ");
+    clean = lastSpace >= 0 ? clean.slice(0, lastSpace).trim() : "";
+  }
+
   if (!clean) return "";
   const words = clean.split(" ");
   return words.slice(-24).join(" ");
@@ -40,6 +51,7 @@ export function OperatorConsole() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const meterFrameRef = useRef<number | null>(null);
   const publishTimerRef = useRef<number | null>(null);
+  const partialFlushTimerRef = useRef<number | null>(null);
   const clearTimerRef = useRef<number | null>(null);
   const demoTimerRef = useRef<number | null>(null);
   const sourceRef = useRef("");
@@ -88,7 +100,31 @@ export function OperatorConsole() {
             : "The overhead display could not be updated.",
         );
       }
-    }, 180);
+    }, CAPTION_PUBLISH_INTERVAL_MS);
+  }
+
+  function schedulePartialWordFlush() {
+    if (partialFlushTimerRef.current) {
+      window.clearTimeout(partialFlushTimerRef.current);
+    }
+
+    partialFlushTimerRef.current = window.setTimeout(async () => {
+      partialFlushTimerRef.current = null;
+      const completeCaption = captionWindow(translationRef.current, true);
+      setTranslatedText(completeCaption);
+      try {
+        await publishCaption({
+          translatedText: completeCaption,
+          status: "live",
+        });
+      } catch (publishError) {
+        setError(
+          publishError instanceof Error
+            ? publishError.message
+            : "The overhead display could not be updated.",
+        );
+      }
+    }, PARTIAL_WORD_FLUSH_MS);
   }
 
   function scheduleAutoClear() {
@@ -198,6 +234,7 @@ export function OperatorConsole() {
           const nextCaption = captionWindow(translationRef.current);
           setTranslatedText(nextCaption);
           schedulePublish();
+          schedulePartialWordFlush();
           scheduleAutoClear();
         }
 
@@ -246,6 +283,9 @@ export function OperatorConsole() {
   function stopEverything(updateDisplay = true) {
     if (meterFrameRef.current) cancelAnimationFrame(meterFrameRef.current);
     if (publishTimerRef.current) window.clearTimeout(publishTimerRef.current);
+    if (partialFlushTimerRef.current) {
+      window.clearTimeout(partialFlushTimerRef.current);
+    }
     if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
     if (demoTimerRef.current) window.clearInterval(demoTimerRef.current);
     if (peerRef.current) {
@@ -467,7 +507,7 @@ export function OperatorConsole() {
           <div className="card">
             <div className="card-header">
               <h2 className="card-title">Live transcript</h2>
-              <span className="card-kicker">Last 24 translated words</span>
+              <span className="card-kicker">Low latency · last 24 words</span>
             </div>
             <div className="translation-readout">
               <p className="readout-label">Spanish output</p>

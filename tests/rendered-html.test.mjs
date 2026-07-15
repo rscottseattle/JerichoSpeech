@@ -32,7 +32,9 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
   assert.match(operator, /Start live translation/);
   assert.match(operator, /Rehearsal mode/);
   assert.match(operator, /\/display\/main/);
-  assert.match(display, /setInterval\(refresh, 250\)/);
+  assert.match(display, /setInterval\(refresh, 75\)/);
+  assert.match(operator, /CAPTION_PUBLISH_INTERVAL_MS = 50/);
+  assert.match(operator, /PARTIAL_WORD_FLUSH_MS = 250/);
   assert.match(captionApi, /liveChannels/);
   assert.match(realtimeApi, /gpt-realtime-translate/);
   assert.match(styles, /body:has\(\.display-canvas\)/);

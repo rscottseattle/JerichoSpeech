@@ -38,7 +38,7 @@ export function CaptionDisplay({
     };
 
     void refresh();
-    const timer = window.setInterval(refresh, 250);
+    const timer = window.setInterval(refresh, 75);
     return () => {
       active = false;
       window.clearInterval(timer);
