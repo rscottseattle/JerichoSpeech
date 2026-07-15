@@ -459,6 +459,7 @@ a {
 
 .caption-panel {
   width: min(1320px, 94vw);
+  height: 4.9em;
   padding: 0.58em 0.88em 0.65em;
   border-radius: 0.18em;
   color: white;
@@ -470,14 +471,21 @@ a {
   line-height: 1.16;
   letter-spacing: -0.018em;
   text-align: center;
-  text-wrap: balance;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  display: grid;
+  place-items: center;
   overflow: hidden;
   opacity: 1;
   transform: translateY(0);
   transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.caption-text {
+  width: 100%;
+  text-wrap: balance;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 .caption-panel.hidden {

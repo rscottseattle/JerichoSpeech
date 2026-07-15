@@ -30,7 +30,7 @@
 ## First test acceptance targets
 
 - The display opens without browser chrome or a visible page background.
-- Captions remain within two lines at normal 1080p output.
+- Captions remain within three lines at normal 1080p output and never display a fourth line.
 - Show, hide, and clear react in under one second on the same computer.
 - A brief connection interruption does not immediately erase the last caption.
 - Live captions clear after roughly eight seconds of silence.

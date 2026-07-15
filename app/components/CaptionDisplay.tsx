@@ -50,7 +50,9 @@ export function CaptionDisplay({
   return (
     <main className={`display-canvas ${preview ? "preview" : ""}`}>
       <div className={`caption-panel ${shown ? "" : "hidden"}`} aria-live="polite">
-        {caption.translatedText || "\u00a0"}
+        <span className="caption-text">
+          {caption.translatedText || "\u00a0"}
+        </span>
       </div>
     </main>
   );
