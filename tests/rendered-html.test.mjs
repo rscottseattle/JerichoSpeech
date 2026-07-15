@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("build contains the JerichoSpeech overhead-caption workflow", async () => {
-  const [layout, operator, display, captionApi, realtimeApi, styles] =
+  const [layout, operator, display, captionApi, realtimeApi, settingsApi, desktop, styles] =
     await Promise.all([
       readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
       readFile(
@@ -25,6 +25,11 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
         new URL("../app/api/realtime/session/route.ts", import.meta.url),
         "utf8",
       ),
+      readFile(
+        new URL("../app/api/settings/openai-key/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(new URL("../desktop/main.cjs", import.meta.url), "utf8"),
       readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     ]);
 
@@ -37,6 +42,10 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
   assert.match(operator, /PARTIAL_WORD_FLUSH_MS = 250/);
   assert.match(captionApi, /liveChannels/);
   assert.match(realtimeApi, /gpt-realtime-translate/);
+  assert.match(settingsApi, /configured/);
+  assert.match(desktop, /safeStorage\s*\.\s*encryptString/);
+  assert.match(desktop, /127\.0\.0\.1/);
+  assert.match(desktop, /\/display\/main/);
   assert.match(styles, /body:has\(\.display-canvas\)/);
   assert.match(styles, /background:\s*transparent/);
   assert.match(styles, /\.caption-panel\s*\{[^}]*height:\s*4\.9em/s);

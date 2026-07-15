@@ -45,6 +45,10 @@ export function OperatorConsole() {
   const [monitorAudio, setMonitorAudio] = useState(false);
   const [error, setError] = useState("");
   const [demoRunning, setDemoRunning] = useState(false);
+  const [apiKeyConfigured, setApiKeyConfigured] = useState<boolean | null>(null);
+  const [apiKeyDraft, setApiKeyDraft] = useState("");
+  const [apiKeySaving, setApiKeySaving] = useState(false);
+  const [apiKeyError, setApiKeyError] = useState("");
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -59,7 +63,20 @@ export function OperatorConsole() {
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    return () => stopEverything(false);
+    let active = true;
+    void fetch("/api/settings/openai-key", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as { configured?: boolean };
+        if (active) setApiKeyConfigured(Boolean(payload.configured));
+      })
+      .catch(() => {
+        if (active) setApiKeyConfigured(false);
+      });
+
+    return () => {
+      active = false;
+      stopEverything(false);
+    };
     // Cleanup should run only when the console unmounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -366,6 +383,40 @@ export function OperatorConsole() {
     return `${window.location.origin}/display/main`;
   }
 
+  async function saveApiKey() {
+    setApiKeyError("");
+    if (apiKeyDraft.trim().length < 20) {
+      setApiKeyError("Enter the complete OpenAI API key.");
+      return;
+    }
+
+    setApiKeySaving(true);
+    try {
+      const response = await fetch("/api/settings/openai-key", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: apiKeyDraft.trim() }),
+      });
+      const payload = (await response.json()) as {
+        configured?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.configured) {
+        throw new Error(payload.error || "The OpenAI key could not be saved.");
+      }
+      setApiKeyDraft("");
+      setApiKeyConfigured(true);
+    } catch (saveError) {
+      setApiKeyError(
+        saveError instanceof Error
+          ? saveError.message
+          : "The OpenAI key could not be saved.",
+      );
+    } finally {
+      setApiKeySaving(false);
+    }
+  }
+
   return (
     <main className="operator-shell">
       <header className="topbar">
@@ -390,10 +441,48 @@ export function OperatorConsole() {
 
       <div className="workspace">
         <section className="stack">
+          {apiKeyConfigured === false ? (
+            <div className="card key-setup-card">
+              <div className="card-header">
+                <h2 className="card-title">Connect OpenAI</h2>
+                <span className="card-kicker">One-time setup</span>
+              </div>
+              <div className="card-body">
+                <label className="field-label" htmlFor="openai-key">
+                  OpenAI API key
+                </label>
+                <div className="key-setup-grid">
+                  <input
+                    id="openai-key"
+                    className="control"
+                    type="password"
+                    autoComplete="off"
+                    placeholder="sk-…"
+                    value={apiKeyDraft}
+                    onChange={(event) => setApiKeyDraft(event.target.value)}
+                  />
+                  <button
+                    className="button primary"
+                    disabled={apiKeySaving}
+                    onClick={saveApiKey}
+                  >
+                    {apiKeySaving ? "Saving…" : "Save securely"}
+                  </button>
+                </div>
+                <p className="helper">
+                  The installed Mac app encrypts this key with macOS secure storage.
+                </p>
+                {apiKeyError ? <p className="error-note">{apiKeyError}</p> : null}
+              </div>
+            </div>
+          ) : null}
+
           <div className="card">
             <div className="card-header">
               <h2 className="card-title">Audio input</h2>
-              <span className="card-kicker">English → Spanish</span>
+              <span className="card-kicker">
+                {apiKeyConfigured ? "OpenAI ready · " : ""}English → Spanish
+              </span>
             </div>
             <div className="card-body">
               <label className="field-label" htmlFor="microphone">

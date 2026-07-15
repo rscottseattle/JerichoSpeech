@@ -12,3 +12,13 @@ JerichoSpeech turns an English microphone or mixer feed into Spanish captions fo
 For live translation, copy `.env.example` to `.env.local`, add `OPENAI_API_KEY`, and restart the app. The key stays on the server; the browser receives only a short-lived Realtime session secret.
 
 The product and development plan is in [`docs/master-build-plan.md`](docs/master-build-plan.md).
+
+## Mac app
+
+The desktop build runs JerichoSpeech and its caption display entirely on the Mac. Launch **JerichoSpeech** from Applications, choose the microphone or mixer input, and click **Enable microphone**.
+
+Use this address for a ProPresenter Web Fill on the same Mac:
+
+`http://127.0.0.1:3838/display/main`
+
+The local operator and display pages work without an internet connection. Live transcription and translation still need internet access to OpenAI. See [`docs/mac-installation.md`](docs/mac-installation.md) for installation and operating notes.

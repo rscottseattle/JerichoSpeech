@@ -197,6 +197,17 @@ a {
   gap: 8px;
 }
 
+.key-setup-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.key-setup-card {
+  border-color: rgba(240, 189, 84, 0.4);
+  box-shadow: 0 0 32px rgba(240, 189, 84, 0.06);
+}
+
 .control,
 .textarea {
   width: 100%;
@@ -522,6 +533,7 @@ a {
   }
 
   .select-row,
+  .key-setup-grid,
   .output-tools {
     display: grid;
     grid-template-columns: 1fr;
