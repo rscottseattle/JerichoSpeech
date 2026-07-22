@@ -10,6 +10,12 @@ const {
 const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
+const {
+  DEFAULT_PROPRESENTER_SETTINGS,
+  discoverProPresenter,
+  normalizeProPresenterSettings,
+  sendProPresenterCaption,
+} = require("./propresenter.cjs");
 
 app.setName("JerichoSpeech");
 
@@ -21,6 +27,15 @@ const channels = new Map();
 let mainWindow = null;
 let localServer = null;
 let stateSaveTimer = null;
+let presenterSyncTimer = null;
+let presenterSyncInFlight = false;
+let pendingPresenterCaption = null;
+let lastPresenterSignature = "";
+const presenterRuntime = {
+  connected: false,
+  lastError: "",
+  lastSyncedAt: "",
+};
 
 function json(response, status, payload) {
   response.writeHead(status, {
@@ -90,6 +105,71 @@ function saveSettings(settings) {
   fs.writeFileSync(userFile("settings.json"), JSON.stringify(settings), {
     mode: 0o600,
   });
+}
+
+function getProPresenterSettings() {
+  const saved = loadSettings().proPresenter;
+  try {
+    return normalizeProPresenterSettings({
+      ...DEFAULT_PROPRESENTER_SETTINGS,
+      ...(saved && typeof saved === "object" ? saved : {}),
+    });
+  } catch {
+    return { ...DEFAULT_PROPRESENTER_SETTINGS };
+  }
+}
+
+function storeProPresenterSettings(nextSettings) {
+  const settings = loadSettings();
+  settings.proPresenter = normalizeProPresenterSettings(nextSettings);
+  saveSettings(settings);
+  return settings.proPresenter;
+}
+
+function presenterSignature(settings, caption) {
+  return JSON.stringify([
+    settings.host,
+    settings.port,
+    settings.messageId,
+    settings.tokenName,
+    caption.visible,
+    caption.translatedText,
+  ]);
+}
+
+async function flushProPresenterCaption() {
+  presenterSyncTimer = null;
+  if (presenterSyncInFlight || !pendingPresenterCaption) return;
+
+  const pending = pendingPresenterCaption;
+  pendingPresenterCaption = null;
+  const signature = presenterSignature(pending.settings, pending.caption);
+  if (signature === lastPresenterSignature) return;
+
+  presenterSyncInFlight = true;
+  try {
+    await sendProPresenterCaption(pending.settings, pending.caption);
+    lastPresenterSignature = signature;
+    presenterRuntime.connected = true;
+    presenterRuntime.lastError = "";
+    presenterRuntime.lastSyncedAt = new Date().toISOString();
+  } catch (error) {
+    presenterRuntime.connected = false;
+    presenterRuntime.lastError =
+      error instanceof Error ? error.message : "ProPresenter update failed.";
+  } finally {
+    presenterSyncInFlight = false;
+    if (pendingPresenterCaption && !presenterSyncTimer) {
+      presenterSyncTimer = setTimeout(flushProPresenterCaption, 25);
+    }
+  }
+}
+
+function scheduleProPresenterCaption(caption, settings = getProPresenterSettings()) {
+  if (!settings.enabled || !settings.messageId || !settings.tokenName) return;
+  pendingPresenterCaption = { settings, caption };
+  if (presenterSyncTimer) clearTimeout(presenterSyncTimer);
+  presenterSyncTimer = setTimeout(flushProPresenterCaption, 150);
 }
 
 function getOpenAIKey() {
@@ -199,6 +279,88 @@ async function handleRequest(request, response) {
       return;
     }
 
+    if (url.pathname === "/api/settings/propresenter") {
+      if (request.method === "GET") {
+        json(response, 200, {
+          supported: true,
+          ...getProPresenterSettings(),
+          runtime: presenterRuntime,
+        });
+        return;
+      }
+      if (request.method === "PUT") {
+        const body = await readJsonBody(request);
+        const previous = getProPresenterSettings();
+        const next = normalizeProPresenterSettings({
+          ...DEFAULT_PROPRESENTER_SETTINGS,
+          ...body,
+        });
+        if (next.enabled && (!next.messageId || !next.tokenName)) {
+          json(response, 400, {
+            error: "Choose a ProPresenter message and text token before enabling direct captions.",
+          });
+          return;
+        }
+
+        const changedDestination =
+          previous.messageId !== next.messageId ||
+          previous.host !== next.host ||
+          previous.port !== next.port;
+        if (previous.enabled && (!next.enabled || changedDestination)) {
+          void sendProPresenterCaption(previous, {
+            translatedText: "",
+            visible: false,
+          }).catch(() => {});
+        }
+
+        const stored = storeProPresenterSettings(next);
+        lastPresenterSignature = "";
+        presenterRuntime.connected = false;
+        presenterRuntime.lastError = "";
+        if (stored.enabled) {
+          scheduleProPresenterCaption(
+            channels.get("main") || defaultChannel("main"),
+            stored,
+          );
+        }
+        json(response, 200, { supported: true, ...stored });
+        return;
+      }
+      json(response, 405, { error: "Method not allowed." });
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/propresenter/test") {
+      try {
+        const body = await readJsonBody(request);
+        const result = await discoverProPresenter({
+          ...DEFAULT_PROPRESENTER_SETTINGS,
+          ...body,
+        });
+        presenterRuntime.connected = true;
+        presenterRuntime.lastError = "";
+        json(response, 200, result);
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "JerichoSpeech could not reach ProPresenter.";
+        presenterRuntime.connected = false;
+        presenterRuntime.lastError = message;
+        json(response, 502, { connected: false, error: message });
+      }
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/propresenter/status") {
+      json(response, 200, {
+        supported: true,
+        settings: getProPresenterSettings(),
+        runtime: presenterRuntime,
+      });
+      return;
+    }
+
     const channelMatch = url.pathname.match(
       /^\/api\/channels\/([a-z0-9-]{1,40})\/caption$/,
     );
@@ -233,6 +395,7 @@ async function handleRequest(request, response) {
         };
         channels.set(channel, next);
         scheduleChannelSave();
+        scheduleProPresenterCaption(next);
         json(response, 200, next);
         return;
       }
@@ -361,6 +524,9 @@ if (!hasSingleInstanceLock) {
         );
         const home = await fetch(ORIGIN);
         const display = await fetch(`${ORIGIN}/display/main`);
+        const presenterSettings = await fetch(
+          `${ORIGIN}/api/settings/propresenter`,
+        ).then((response) => response.json());
         const writtenCaption = await fetch(
           `${ORIGIN}/api/channels/desktop-test/caption`,
           {
@@ -377,6 +543,7 @@ if (!hasSingleInstanceLock) {
           health.status !== "ready" ||
           !home.ok ||
           !display.ok ||
+          presenterSettings.supported !== true ||
           writtenCaption.translatedText !== "Prueba de escritorio"
         ) {
           throw new Error("Desktop smoke test failed.");
@@ -402,6 +569,7 @@ if (!hasSingleInstanceLock) {
 
   app.on("before-quit", () => {
     if (channels.size) saveChannelsNow();
+    if (presenterSyncTimer) clearTimeout(presenterSyncTimer);
     localServer?.close();
   });
 

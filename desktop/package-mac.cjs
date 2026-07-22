@@ -9,6 +9,9 @@ const outputDir = path.join(projectRoot, "release");
 const temporaryOutput = fs.mkdtempSync(
   path.join(os.tmpdir(), "jerichospeech-build-")
 );
+const temporaryProject = fs.mkdtempSync(
+  path.join(os.tmpdir(), "jerichospeech-project-")
+);
 const builder = path.join(
   projectRoot,
   "node_modules",
@@ -17,13 +20,54 @@ const builder = path.join(
 );
 
 try {
+  const sourcePackage = JSON.parse(
+    fs.readFileSync(path.join(projectRoot, "package.json"), "utf8")
+  );
+  const electronPackage = JSON.parse(
+    fs.readFileSync(
+      path.join(projectRoot, "node_modules", "electron", "package.json"),
+      "utf8"
+    )
+  );
+  const stagedPackage = {
+    name: sourcePackage.name,
+    version: sourcePackage.version,
+    description: sourcePackage.description,
+    author: sourcePackage.author,
+    private: true,
+    main: sourcePackage.main,
+    build: {
+      ...sourcePackage.build,
+      electronVersion: electronPackage.version,
+      npmRebuild: false,
+      directories: { output: temporaryOutput },
+    },
+  };
+
+  fs.mkdirSync(path.join(temporaryProject, "desktop"), { recursive: true });
+  for (const name of ["after-pack.cjs", "main.cjs", "propresenter.cjs"]) {
+    fs.copyFileSync(
+      path.join(projectRoot, "desktop", name),
+      path.join(temporaryProject, "desktop", name)
+    );
+  }
+  fs.cpSync(
+    path.join(projectRoot, "desktop-dist"),
+    path.join(temporaryProject, "desktop-dist"),
+    { recursive: true }
+  );
+  fs.writeFileSync(
+    path.join(temporaryProject, "package.json"),
+    JSON.stringify(stagedPackage, null, 2)
+  );
+
   execFileSync(
     builder,
     [
       "--mac",
       "dmg",
       "--arm64",
-      `--config.directories.output=${temporaryOutput}`,
+      `--projectDir=${temporaryProject}`,
     ],
     {
       cwd: projectRoot,
@@ -51,4 +95,5 @@ try {
   }
 } finally {
   fs.rmSync(temporaryOutput, { recursive: true, force: true });
+  fs.rmSync(temporaryProject, { recursive: true, force: true });
 }

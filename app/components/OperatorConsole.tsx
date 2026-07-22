@@ -3,6 +3,23 @@
 import { useEffect, useRef, useState } from "react";
 
 type RunState = "idle" | "connecting" | "live";
+type PresenterConnectionState = "idle" | "testing" | "connected";
+
+type PresenterSettings = {
+  supported: boolean;
+  enabled: boolean;
+  host: string;
+  port: number;
+  messageId: string;
+  tokenName: string;
+};
+
+type PresenterMessage = {
+  uuid: string;
+  name: string;
+  index: number;
+  textTokens: string[];
+};
 
 const rehearsalLines = [
   "Bienvenidos. Nos alegra mucho que estén aquí con nosotros esta mañana.",
@@ -49,6 +66,14 @@ export function OperatorConsole() {
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [apiKeyError, setApiKeyError] = useState("");
+  const [presenterSettings, setPresenterSettings] =
+    useState<PresenterSettings | null>(null);
+  const [presenterMessages, setPresenterMessages] = useState<PresenterMessage[]>([]);
+  const [presenterConnection, setPresenterConnection] =
+    useState<PresenterConnectionState>("idle");
+  const [presenterVersion, setPresenterVersion] = useState("");
+  const [presenterSaving, setPresenterSaving] = useState(false);
+  const [presenterError, setPresenterError] = useState("");
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -71,6 +96,17 @@ export function OperatorConsole() {
       })
       .catch(() => {
         if (active) setApiKeyConfigured(false);
+      });
+
+    void fetch("/api/settings/propresenter", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as PresenterSettings;
+        if (!active || !payload.supported) return;
+        setPresenterSettings(payload);
+        if (payload.enabled) void testProPresenterConnection(payload);
+      })
+      .catch(() => {
+        // Direct ProPresenter output is available only in the installed Mac app.
       });
 
     return () => {
@@ -417,6 +453,128 @@ export function OperatorConsole() {
     }
   }
 
+  async function testProPresenterConnection(
+    candidate = presenterSettings,
+  ) {
+    if (!candidate) return;
+    setPresenterConnection("testing");
+    setPresenterError("");
+    try {
+      const response = await fetch("/api/propresenter/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host: candidate.host,
+          port: candidate.port,
+        }),
+      });
+      const payload = (await response.json()) as {
+        connected?: boolean;
+        error?: string;
+        version?: { description?: string };
+        messages?: PresenterMessage[];
+      };
+      if (!response.ok || !payload.connected) {
+        throw new Error(payload.error || "JerichoSpeech could not reach ProPresenter.");
+      }
+
+      const messages = payload.messages || [];
+      const preferred =
+        messages.find((message) => message.uuid === candidate.messageId) ||
+        messages.find((message) => /jericho/i.test(message.name)) ||
+        messages[0];
+      const tokenName = preferred
+        ? preferred.textTokens.includes(candidate.tokenName)
+          ? candidate.tokenName
+          : preferred.textTokens[0] || ""
+        : "";
+
+      setPresenterMessages(messages);
+      setPresenterVersion(payload.version?.description || "ProPresenter");
+      setPresenterConnection("connected");
+      setPresenterSettings((current) =>
+        current
+          ? {
+              ...current,
+              messageId: preferred?.uuid || current.messageId,
+              tokenName,
+            }
+          : current,
+      );
+      if (!messages.length) {
+        setPresenterError("Create a Message in ProPresenter, then check again.");
+      } else if (preferred && !preferred.textTokens.length) {
+        setPresenterError(
+          `The “${preferred.name}” Message needs a text token such as {Caption}.`,
+        );
+      }
+    } catch (connectionError) {
+      setPresenterConnection("idle");
+      setPresenterMessages([]);
+      setPresenterVersion("");
+      setPresenterError(
+        connectionError instanceof Error
+          ? connectionError.message
+          : "JerichoSpeech could not reach ProPresenter.",
+      );
+    }
+  }
+
+  function selectPresenterMessage(messageId: string) {
+    const message = presenterMessages.find((candidate) => candidate.uuid === messageId);
+    setPresenterSettings((current) =>
+      current
+        ? {
+            ...current,
+            messageId,
+            tokenName: message?.textTokens[0] || "",
+          }
+        : current,
+    );
+    setPresenterError(
+      message && !message.textTokens.length
+        ? `The “${message.name}” Message needs a text token such as {Caption}.`
+        : "",
+    );
+  }
+
+  async function savePresenterSettings(enabled: boolean) {
+    if (!presenterSettings) return;
+    if (enabled && (!presenterSettings.messageId || !presenterSettings.tokenName)) {
+      setPresenterError("Choose a Message with a text token before enabling direct output.");
+      return;
+    }
+
+    setPresenterSaving(true);
+    setPresenterError("");
+    try {
+      const response = await fetch("/api/settings/propresenter", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...presenterSettings, enabled }),
+      });
+      const payload = (await response.json()) as PresenterSettings & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "The ProPresenter connection could not be saved.");
+      }
+      setPresenterSettings(payload);
+      if (enabled) {
+        await testProPresenterConnection(payload);
+      } else {
+        setPresenterConnection("idle");
+        setPresenterVersion("");
+      }
+    } catch (saveError) {
+      setPresenterError(
+        saveError instanceof Error
+          ? saveError.message
+          : "The ProPresenter connection could not be saved.",
+      );
+    } finally {
+      setPresenterSaving(false);
+    }
+  }
+
   return (
     <main className="operator-shell">
       <header className="topbar">
@@ -590,6 +748,146 @@ export function OperatorConsole() {
               </div>
             </div>
           </div>
+
+          {presenterSettings ? (
+            <div className="card presenter-card">
+              <div className="card-header">
+                <h2 className="card-title">ProPresenter direct</h2>
+                <span className="card-kicker">
+                  {presenterSettings.enabled
+                    ? "Enabled"
+                    : presenterConnection === "connected"
+                      ? "Connected"
+                      : "Optional"}
+                </span>
+              </div>
+              <div className="card-body">
+                <p className="helper presenter-intro">
+                  Sends captions to a ProPresenter Message layer. ProPresenter 7.9 or newer is required.
+                </p>
+                <div className="presenter-address-grid">
+                  <label>
+                    <span className="field-label">Computer</span>
+                    <input
+                      className="control"
+                      value={presenterSettings.host}
+                      onChange={(event) =>
+                        setPresenterSettings((current) =>
+                          current ? { ...current, host: event.target.value } : current,
+                        )
+                      }
+                      placeholder="127.0.0.1"
+                    />
+                  </label>
+                  <label>
+                    <span className="field-label">API port</span>
+                    <input
+                      className="control"
+                      type="number"
+                      min="1"
+                      max="65535"
+                      value={presenterSettings.port}
+                      onChange={(event) =>
+                        setPresenterSettings((current) =>
+                          current
+                            ? { ...current, port: Number(event.target.value) }
+                            : current,
+                        )
+                      }
+                    />
+                  </label>
+                  <button
+                    className="button presenter-find-button"
+                    disabled={presenterConnection === "testing"}
+                    onClick={() => testProPresenterConnection()}
+                  >
+                    {presenterConnection === "testing" ? "Checking…" : "Find ProPresenter"}
+                  </button>
+                </div>
+
+                {presenterConnection === "connected" ? (
+                  <p className="connection-note">Connected to {presenterVersion}</p>
+                ) : null}
+
+                <div className="presenter-select-grid">
+                  <label>
+                    <span className="field-label">Caption Message</span>
+                    <select
+                      className="control"
+                      value={presenterSettings.messageId}
+                      disabled={!presenterMessages.length}
+                      onChange={(event) => selectPresenterMessage(event.target.value)}
+                    >
+                      {!presenterMessages.length ? (
+                        <option value="">Connect to load Messages</option>
+                      ) : null}
+                      {presenterMessages.map((message) => (
+                        <option key={message.uuid} value={message.uuid}>
+                          {message.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="field-label">Text token</span>
+                    <select
+                      className="control"
+                      value={presenterSettings.tokenName}
+                      disabled={!presenterSettings.messageId}
+                      onChange={(event) =>
+                        setPresenterSettings((current) =>
+                          current ? { ...current, tokenName: event.target.value } : current,
+                        )
+                      }
+                    >
+                      {(
+                        presenterMessages.find(
+                          (message) => message.uuid === presenterSettings.messageId,
+                        )?.textTokens || []
+                      ).length ? (
+                        presenterMessages
+                          .find((message) => message.uuid === presenterSettings.messageId)
+                          ?.textTokens.map((token) => (
+                            <option key={token} value={token}>
+                              {token}
+                            </option>
+                          ))
+                      ) : (
+                        <option value="">No text tokens found</option>
+                      )}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="button-row presenter-actions">
+                  <button
+                    className="button primary"
+                    disabled={presenterSaving}
+                    onClick={() => savePresenterSettings(true)}
+                  >
+                    {presenterSaving
+                      ? "Saving…"
+                      : presenterSettings.enabled
+                        ? "Save connection"
+                        : "Enable direct output"}
+                  </button>
+                  {presenterSettings.enabled ? (
+                    <button
+                      className="button"
+                      disabled={presenterSaving}
+                      onClick={() => savePresenterSettings(false)}
+                    >
+                      Disable
+                    </button>
+                  ) : null}
+                </div>
+                <p className="helper">
+                  Create a ProPresenter Message containing {"{Caption}"}, then select it here.
+                </p>
+                {presenterError ? <p className="error-note">{presenterError}</p> : null}
+              </div>
+            </div>
+          ) : null}
         </section>
 
         <section className="stack">

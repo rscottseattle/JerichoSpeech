@@ -208,6 +208,48 @@ a {
   box-shadow: 0 0 32px rgba(240, 189, 84, 0.06);
 }
 
+.presenter-card {
+  border-color: rgba(75, 213, 139, 0.28);
+}
+
+.presenter-intro {
+  margin-top: 0;
+}
+
+.presenter-address-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.presenter-address-grid label,
+.presenter-select-grid label {
+  min-width: 0;
+}
+
+.presenter-find-button {
+  white-space: nowrap;
+}
+
+.presenter-select-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.presenter-actions {
+  margin-top: 14px;
+}
+
+.connection-note {
+  margin: 10px 0 0;
+  color: #79e3aa;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .control,
 .textarea {
   width: 100%;
@@ -534,6 +576,8 @@ a {
 
   .select-row,
   .key-setup-grid,
+  .presenter-address-grid,
+  .presenter-select-grid,
   .output-tools {
     display: grid;
     grid-template-columns: 1fr;

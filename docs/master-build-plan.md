@@ -2,9 +2,9 @@
 
 CaptionKit-inspired live translation platform
 
-Master development plan — July 15, 2026
+Master development plan — July 22, 2026
 
-> **Implementation status — July 15, 2026:** Milestone 1 is built for local testing. The operator console, persistent `main` caption channel, transparent `/display/main` output, manual rehearsal sequence, microphone selection, audio meter, OpenAI Realtime session bridge, Spanish transcript stabilization, visibility control, and automatic caption clearing are implemented. Live speech translation is awaiting an `OPENAI_API_KEY`; the overhead screen workflow can be tested immediately in rehearsal mode. See [`overhead-caption-test-guide.md`](overhead-caption-test-guide.md).
+> **Implementation status — July 22, 2026:** Milestone 1 is installed for local testing as an Apple-Silicon Mac app. The operator console, encrypted OpenAI key, Realtime translation, persistent `main` caption channel, three-line transparent `/display/main` output, ProPresenter 7.9+ direct Message integration, Web Fill fallback, manual rehearsal sequence, microphone selection, audio meter, Spanish transcript stabilization, visibility control, and automatic caption clearing are implemented. See [`mac-installation.md`](mac-installation.md).
 
 ## Executive recommendation
 
@@ -157,7 +157,7 @@ This inventory is based on CaptionKit's public product site and help center as o
 - font size, line count, text color, background color, opacity, and top/bottom position;
 - optional solid stage color for chroma keying;
 - sample-text/test mode;
-- ProPresenter Web Fill/Prop workflow;
+- ProPresenter direct Message API and Web Fill/Prop workflows;
 - browser-source workflows for OBS, FreeShow, WorshipTools, Proclaim, and similar software;
 - direct use on a smart TV or browser-connected monitor.
 
@@ -202,8 +202,8 @@ The first deployable version is for one church and includes:
 - Chrome/Edge operator console;
 - soundboard/USB audio selection and meter;
 - start, stop, clear, hide, and show;
-- two-line transparent lower third;
-- persistent ProPresenter Web Fill URL;
+- three-line transparent lower third;
+- persistent ProPresenter Web Fill URL and direct Message output;
 - public Spanish viewer link and QR code;
 - keyword glossary;
 - saved English and Spanish transcripts;

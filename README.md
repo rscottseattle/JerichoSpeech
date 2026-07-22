@@ -15,10 +15,10 @@ The product and development plan is in [`docs/master-build-plan.md`](docs/master
 
 ## Mac app
 
-The desktop build runs JerichoSpeech and its caption display entirely on the Mac. Launch **JerichoSpeech** from Applications, choose the microphone or mixer input, and click **Enable microphone**.
+The desktop build runs JerichoSpeech and its caption display entirely on the Mac. Launch **JerichoSpeech** from Applications, choose the microphone or mixer input, and click **Enable microphone**. It can send captions directly to a ProPresenter 7.9+ Message layer through ProPresenter's local API.
 
 Use this address for a ProPresenter Web Fill on the same Mac:
 
 `http://127.0.0.1:3838/display/main`
 
-The local operator and display pages work without an internet connection. Live transcription and translation still need internet access to OpenAI. See [`docs/mac-installation.md`](docs/mac-installation.md) for installation and operating notes.
+The local operator, ProPresenter connection, and display pages work without an internet connection. Live transcription and translation still need internet access to OpenAI. See [`docs/mac-installation.md`](docs/mac-installation.md) for installation and operating notes.

@@ -37,11 +37,16 @@ app.whenReady().then(() => {
 
   const settingsPath = path.join(app.getPath("userData"), "settings.json");
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  let settings = {};
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  } catch {
+    // A first-time installation does not have a settings file yet.
+  }
+  settings.openaiKeyEncrypted = safeStorage.encryptString(apiKey).toString("base64");
   fs.writeFileSync(
     settingsPath,
-    JSON.stringify({
-      openaiKeyEncrypted: safeStorage.encryptString(apiKey).toString("base64"),
-    }),
+    JSON.stringify(settings),
     { mode: 0o600 },
   );
   console.log("The OpenAI key was imported into macOS secure storage.");
