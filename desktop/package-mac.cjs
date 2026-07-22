@@ -45,7 +45,12 @@ try {
   };
 
   fs.mkdirSync(path.join(temporaryProject, "desktop"), { recursive: true });
-  for (const name of ["after-pack.cjs", "main.cjs", "propresenter.cjs"]) {
+  for (const name of [
+    "after-pack.cjs",
+    "entitlements.mac.plist",
+    "main.cjs",
+    "propresenter.cjs",
+  ]) {
     fs.copyFileSync(
       path.join(projectRoot, "desktop", name),
       path.join(temporaryProject, "desktop", name)

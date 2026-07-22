@@ -6,6 +6,7 @@ const {
   safeStorage,
   session,
   shell,
+  systemPreferences,
 } = require("electron");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -194,6 +195,17 @@ function storeOpenAIKey(apiKey) {
   saveSettings(settings);
 }
 
+function getMicrophoneAccessStatus() {
+  if (process.platform !== "darwin") return "granted";
+  return systemPreferences.getMediaAccessStatus("microphone");
+}
+
+async function requestMicrophoneAccess() {
+  if (process.platform !== "darwin") return true;
+  if (getMicrophoneAccessStatus() === "granted") return true;
+  return systemPreferences.askForMediaAccess("microphone");
+}
+
 async function readJsonBody(request) {
   const chunks = [];
   let size = 0;
@@ -256,6 +268,42 @@ async function handleRequest(request, response) {
         openaiConfigured: Boolean(getOpenAIKey()),
         displayUrl: `${ORIGIN}/display/main`,
       });
+      return;
+    }
+
+    if (url.pathname === "/api/permissions/microphone") {
+      if (request.method === "GET") {
+        const status = getMicrophoneAccessStatus();
+        json(response, 200, {
+          supported: process.platform === "darwin",
+          granted: status === "granted",
+          status,
+        });
+        return;
+      }
+      if (request.method === "POST") {
+        const granted = await requestMicrophoneAccess();
+        json(response, 200, {
+          supported: process.platform === "darwin",
+          granted,
+          status: getMicrophoneAccessStatus(),
+        });
+        return;
+      }
+      json(response, 405, { error: "Method not allowed." });
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      url.pathname === "/api/permissions/microphone/settings"
+    ) {
+      if (process.platform === "darwin") {
+        await shell.openExternal(
+          "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+        );
+      }
+      json(response, 200, { opened: process.platform === "darwin" });
       return;
     }
 
@@ -467,13 +515,15 @@ function startLocalServer() {
 
 function configurePermissions() {
   const allowLocalMedia = (webContents, permission, callback, details) => {
-    const requestingUrl = details.requestingUrl || webContents.getURL();
+    const requestingUrl = details?.requestingUrl || webContents?.getURL() || "";
     callback(permission === "media" && requestingUrl.startsWith(ORIGIN));
   };
   session.defaultSession.setPermissionRequestHandler(allowLocalMedia);
   session.defaultSession.setPermissionCheckHandler(
-    (_webContents, permission, requestingOrigin) =>
-      permission === "media" && requestingOrigin.startsWith(ORIGIN),
+    (webContents, permission, requestingOrigin) => {
+      const origin = requestingOrigin || webContents?.getURL() || "";
+      return permission === "media" && origin.startsWith(ORIGIN);
+    },
   );
 }
 
@@ -527,6 +577,9 @@ if (!hasSingleInstanceLock) {
         const presenterSettings = await fetch(
           `${ORIGIN}/api/settings/propresenter`,
         ).then((response) => response.json());
+        const microphonePermission = await fetch(
+          `${ORIGIN}/api/permissions/microphone`,
+        ).then((response) => response.json());
         const writtenCaption = await fetch(
           `${ORIGIN}/api/channels/desktop-test/caption`,
           {
@@ -544,6 +597,7 @@ if (!hasSingleInstanceLock) {
           !home.ok ||
           !display.ok ||
           presenterSettings.supported !== true ||
+          microphonePermission.supported !== (process.platform === "darwin") ||
           writtenCaption.translatedText !== "Prueba de escritorio"
         ) {
           throw new Error("Desktop smoke test failed.");

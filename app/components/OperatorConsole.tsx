@@ -5,6 +5,12 @@ import { useEffect, useRef, useState } from "react";
 type RunState = "idle" | "connecting" | "live";
 type PresenterConnectionState = "idle" | "testing" | "connected";
 
+type MicrophonePermission = {
+  supported?: boolean;
+  granted?: boolean;
+  status?: "not-determined" | "granted" | "denied" | "restricted" | "unknown";
+};
+
 type PresenterSettings = {
   supported: boolean;
   enabled: boolean;
@@ -61,6 +67,7 @@ export function OperatorConsole() {
   const [visible, setVisible] = useState(true);
   const [monitorAudio, setMonitorAudio] = useState(false);
   const [error, setError] = useState("");
+  const [microphoneBlocked, setMicrophoneBlocked] = useState(false);
   const [demoRunning, setDemoRunning] = useState(false);
   const [apiKeyConfigured, setApiKeyConfigured] = useState<boolean | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
@@ -210,9 +217,72 @@ export function OperatorConsole() {
     tick();
   }
 
+  async function requestNativeMicrophoneAccess() {
+    try {
+      const response = await fetch("/api/permissions/microphone", {
+        method: "POST",
+      });
+      if (response.status === 404) return;
+
+      const permission = (await response.json()) as MicrophonePermission & {
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(permission.error || "Mac microphone access could not be checked.");
+      }
+      if (permission.supported && !permission.granted) {
+        setMicrophoneBlocked(true);
+        throw new Error(
+          "JerichoSpeech is blocked from using the microphone. Open Mac Microphone Settings, enable JerichoSpeech, then quit and reopen the app.",
+        );
+      }
+    } catch (permissionError) {
+      if (
+        permissionError instanceof Error &&
+        permissionError.message.includes("JerichoSpeech is blocked")
+      ) {
+        throw permissionError;
+      }
+      // The hosted browser version does not have the native Mac permission endpoint.
+    }
+  }
+
+  function microphoneErrorMessage(permissionError: unknown) {
+    if (permissionError instanceof DOMException) {
+      if (permissionError.name === "NotAllowedError") {
+        setMicrophoneBlocked(true);
+        return "JerichoSpeech does not have microphone access. Open Mac Microphone Settings, enable JerichoSpeech, then quit and reopen the app.";
+      }
+      if (permissionError.name === "NotFoundError") {
+        return "No microphone or mixer input was found. Connect the device, then click Enable again.";
+      }
+      if (permissionError.name === "OverconstrainedError") {
+        return "The selected audio input is no longer available. Click Enable and choose it again.";
+      }
+    }
+    return permissionError instanceof Error
+      ? permissionError.message
+      : "JerichoSpeech could not open the selected audio input.";
+  }
+
+  async function openMicrophoneSettings() {
+    try {
+      const response = await fetch("/api/permissions/microphone/settings", {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error();
+    } catch {
+      setError(
+        "Open System Settings → Privacy & Security → Microphone, then enable JerichoSpeech.",
+      );
+    }
+  }
+
   async function loadDevices() {
     setError("");
+    setMicrophoneBlocked(false);
     try {
+      await requestNativeMicrophoneAccess();
       const permissionStream = await navigator.mediaDevices.getUserMedia({
         audio: true,
       });
@@ -222,8 +292,8 @@ export function OperatorConsole() {
       permissionStream.getTracks().forEach((track) => track.stop());
       setDevices(available);
       if (!deviceId && available[0]) setDeviceId(available[0].deviceId);
-    } catch {
-      setError("Microphone permission was not granted. Check the browser settings.");
+    } catch (permissionError) {
+      setError(microphoneErrorMessage(permissionError));
     }
   }
 
@@ -234,8 +304,10 @@ export function OperatorConsole() {
     translationRef.current = "";
     setSourceText("");
     setTranslatedText("");
+    setMicrophoneBlocked(false);
 
     try {
+      await requestNativeMicrophoneAccess();
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: deviceId ? { deviceId: { exact: deviceId } } : true,
       });
@@ -324,11 +396,7 @@ export function OperatorConsole() {
         sdp: await answerResponse.text(),
       });
     } catch (startError) {
-      setError(
-        startError instanceof Error
-          ? startError.message
-          : "Live translation could not start.",
-      );
+      setError(microphoneErrorMessage(startError));
       stopEverything(false);
     }
   }
@@ -687,6 +755,11 @@ export function OperatorConsole() {
                 The microphone stays in this browser. A short-lived OpenAI session carries the live audio.
               </p>
               {error ? <p className="error-note">{error}</p> : null}
+              {microphoneBlocked ? (
+                <button className="button" onClick={openMicrophoneSettings}>
+                  Open Mac Microphone Settings
+                </button>
+              ) : null}
             </div>
           </div>
 

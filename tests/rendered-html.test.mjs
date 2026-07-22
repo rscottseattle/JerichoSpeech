@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("build contains the JerichoSpeech overhead-caption workflow", async () => {
-  const [layout, operator, display, captionApi, realtimeApi, settingsApi, presenterSettingsApi, desktop, presenter, styles] =
+  const [layout, operator, display, captionApi, realtimeApi, settingsApi, presenterSettingsApi, desktop, presenter, entitlements, styles] =
     await Promise.all([
       readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
       readFile(
@@ -35,6 +35,10 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
       ),
       readFile(new URL("../desktop/main.cjs", import.meta.url), "utf8"),
       readFile(new URL("../desktop/propresenter.cjs", import.meta.url), "utf8"),
+      readFile(
+        new URL("../desktop/entitlements.mac.plist", import.meta.url),
+        "utf8",
+      ),
       readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     ]);
 
@@ -50,6 +54,10 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
   assert.match(settingsApi, /configured/);
   assert.match(presenterSettingsApi, /supported: false/);
   assert.match(desktop, /safeStorage\s*\.\s*encryptString/);
+  assert.match(desktop, /systemPreferences\.askForMediaAccess\("microphone"\)/);
+  assert.match(desktop, /\/api\/permissions\/microphone/);
+  assert.match(operator, /Open Mac Microphone Settings/);
+  assert.match(entitlements, /com\.apple\.security\.device\.audio-input/);
   assert.match(desktop, /127\.0\.0\.1/);
   assert.match(desktop, /\/display\/main/);
   assert.match(desktop, /scheduleProPresenterCaption/);
