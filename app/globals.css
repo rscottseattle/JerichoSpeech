@@ -523,22 +523,34 @@ a {
   font-weight: 700;
   line-height: 1.16;
   letter-spacing: -0.018em;
-  text-align: center;
-  display: grid;
-  place-items: center;
+  text-align: left;
   overflow: hidden;
   opacity: 1;
   transform: translateY(0);
   transition: opacity 140ms ease, transform 140ms ease;
 }
 
+.caption-viewport {
+  width: 100%;
+  height: 3.48em;
+  overflow: hidden;
+}
+
+.caption-track {
+  width: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
 .caption-text {
   width: 100%;
-  text-wrap: balance;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
+  flex: none;
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  text-wrap: wrap;
 }
 
 .caption-panel.hidden {

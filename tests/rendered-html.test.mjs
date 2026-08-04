@@ -66,7 +66,10 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
   assert.match(styles, /body:has\(\.display-canvas\)/);
   assert.match(styles, /background:\s*transparent/);
   assert.match(styles, /\.caption-panel\s*\{[^}]*height:\s*4\.9em/s);
-  assert.match(styles, /\.caption-text\s*\{[^}]*-webkit-line-clamp:\s*3/s);
+  assert.match(styles, /\.caption-viewport\s*\{[^}]*height:\s*3\.48em/s);
+  assert.match(styles, /\.caption-panel\s*\{[^}]*text-align:\s*left/s);
+  assert.match(display, /appendedCaptionText/);
+  assert.match(display, /SCROLL_DURATION_MS = 520/);
 
   await access(new URL("../dist/server/index.js", import.meta.url));
 });
