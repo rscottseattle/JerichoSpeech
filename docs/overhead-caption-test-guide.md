@@ -30,6 +30,8 @@
 ## First test acceptance targets
 
 - The display opens without browser chrome or a visible page background.
+- At 1920×1080, the caption panel spans approximately 80% of the screen width.
+- Avenir Next Demi, open tracking, and off-white text remain legible without appearing bulky.
 - Captions remain within three lines at normal 1080p output and never display a fourth line.
 - Completed lines remain fixed while new words build from left to right on the bottom line.
 - Caption polling gaps do not force short or premature line breaks.

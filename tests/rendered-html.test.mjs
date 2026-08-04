@@ -67,9 +67,12 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
   assert.match(styles, /body:has\(\.display-canvas\)/);
   assert.match(styles, /background:\s*transparent/);
   assert.match(styles, /\.caption-panel\s*\{[^}]*height:\s*4\.9em/s);
-  assert.match(styles, /\.caption-viewport\s*\{[^}]*height:\s*3\.48em/s);
+  assert.match(styles, /\.caption-panel\s*\{[^}]*width:\s*min\(1536px, 90vw\)/s);
+  assert.match(styles, /\.caption-viewport\s*\{[^}]*height:\s*3\.6em/s);
   assert.match(styles, /\.caption-panel\s*\{[^}]*text-align:\s*left/s);
+  assert.match(styles, /font-family:\s*"Avenir Next"/);
   assert.match(styles, /font-size:\s*clamp\(22px, 2\.6vw, 50px\)/);
+  assert.match(styles, /font-weight:\s*600/);
   assert.match(display, /appendedCaptionText/);
   assert.match(display, /return ` \$\{next\}`/);
   assert.match(display, /SCROLL_DURATION_MS = 680/);
