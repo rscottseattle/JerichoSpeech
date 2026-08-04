@@ -7,41 +7,22 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  CaptionComposer,
+  type CaptionLine,
+} from "../lib/caption-composer";
 
 type CaptionState = {
   translatedText: string;
   visible: boolean;
   sequence: number;
+  status: string;
 };
 
 const SCROLL_DURATION_MS = 680;
 const SCROLL_HOLD_MS = 120;
-const MIN_SLIDING_OVERLAP = 16;
-
-function cleanCaptionText(value: string) {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function appendedCaptionText(previous: string, next: string) {
-  if (!previous) return next;
-  if (next === previous || previous.endsWith(next)) return "";
-  if (next.startsWith(previous)) return next.slice(previous.length);
-
-  const maximumOverlap = Math.min(previous.length, next.length);
-  for (
-    let length = maximumOverlap;
-    length >= MIN_SLIDING_OVERLAP;
-    length -= 1
-  ) {
-    if (previous.endsWith(next.slice(0, length))) {
-      return next.slice(length);
-    }
-  }
-
-  // A missed polling window must not create an artificial visual line break.
-  // The browser's measured width is the only thing allowed to finish a row.
-  return ` ${next}`;
-}
+const PHRASE_BUFFER_MS = 240;
+const PHRASE_END_BUFFER_MS = 90;
 
 function easeInOutCubic(progress: number) {
   return progress < 0.5
@@ -60,10 +41,14 @@ export function CaptionDisplay({
     translatedText: "",
     visible: true,
     sequence: 0,
+    status: "idle",
   });
-  const [rollingText, setRollingText] = useState("");
-  const previousCaptionRef = useRef("");
+  const [lines, setLines] = useState<CaptionLine[]>([]);
+  const composerRef = useRef(new CaptionComposer());
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const measureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const phraseTimerRef = useRef<number | null>(null);
+  const flushComposerRef = useRef<() => void>(() => {});
   const scrollFrameRef = useRef<number | null>(null);
   const scrollHoldRef = useRef<number | null>(null);
   const scrollOneLineRef = useRef<() => void>(() => {});
@@ -122,8 +107,7 @@ export function CaptionDisplay({
 
     const advance = (now: number) => {
       const progress = Math.min(1, (now - startedAt) / SCROLL_DURATION_MS);
-      viewport.scrollTop =
-        start + distance * easeInOutCubic(progress);
+      viewport.scrollTop = start + distance * easeInOutCubic(progress);
 
       if (progress < 1) {
         scrollFrameRef.current = window.requestAnimationFrame(advance);
@@ -151,6 +135,53 @@ export function CaptionDisplay({
     scrollOneLineRef.current = scrollOneLine;
   }, [scrollOneLine]);
 
+  const flushComposer = useCallback(() => {
+    phraseTimerRef.current = null;
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    if (!measureCanvasRef.current) {
+      measureCanvasRef.current = document.createElement("canvas");
+    }
+    const context = measureCanvasRef.current.getContext("2d");
+    const computed = window.getComputedStyle(viewport);
+    if (context) {
+      context.font = `${computed.fontWeight} ${computed.fontSize} ${computed.fontFamily}`;
+    }
+
+    const result = composerRef.current.flush({
+      maxWidth: viewport.clientWidth,
+      measureText: (value) => context?.measureText(value).width ?? value.length * 24,
+    });
+    setLines(result.lines);
+
+    if (result.hasPending) {
+      const delay = result.lineAdded
+        ? SCROLL_DURATION_MS + SCROLL_HOLD_MS
+        : PHRASE_END_BUFFER_MS;
+      phraseTimerRef.current = window.setTimeout(
+        () => flushComposerRef.current(),
+        delay,
+      );
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    flushComposerRef.current = flushComposer;
+  }, [flushComposer]);
+
+  const scheduleComposerFlush = useCallback((phraseEnded: boolean) => {
+    const delay = phraseEnded ? PHRASE_END_BUFFER_MS : PHRASE_BUFFER_MS;
+    if (phraseTimerRef.current !== null) {
+      if (!phraseEnded) return;
+      window.clearTimeout(phraseTimerRef.current);
+    }
+    phraseTimerRef.current = window.setTimeout(
+      () => flushComposerRef.current(),
+      delay,
+    );
+  }, []);
+
   useEffect(() => {
     let active = true;
     let timer: number | null = null;
@@ -166,16 +197,15 @@ export function CaptionDisplay({
             if (next.sequence < current.sequence) return current;
             return current.sequence === next.sequence &&
               current.translatedText === next.translatedText &&
-              current.visible === next.visible
+              current.visible === next.visible &&
+              current.status === next.status
               ? current
               : next;
           });
         }
       } catch {
-        // Keep the most recent caption on screen during a brief network interruption.
+        // Network silence preserves the last readable frame.
       } finally {
-        // Wait for this request to finish before polling again so responses
-        // cannot arrive out of order and masquerade as a new caption segment.
         if (active) timer = window.setTimeout(refresh, 75);
       }
     };
@@ -188,26 +218,30 @@ export function CaptionDisplay({
   }, [channel]);
 
   useEffect(() => {
-    const next = cleanCaptionText(caption.translatedText);
+    const next = caption.translatedText.replace(/\s+/g, " ").trim();
 
     if (!next) {
-      previousCaptionRef.current = "";
+      if (caption.status !== "clear" && caption.status !== "idle") return;
+      if (phraseTimerRef.current !== null) {
+        window.clearTimeout(phraseTimerRef.current);
+        phraseTimerRef.current = null;
+      }
+      composerRef.current.clear();
       positionedRef.current = false;
       latestScrollTargetRef.current = 0;
-      setRollingText("");
+      setLines([]);
       return;
     }
 
-    const addition = appendedCaptionText(previousCaptionRef.current, next);
-    previousCaptionRef.current = next;
-    if (addition) setRollingText((current) => `${current}${addition}`);
-  }, [caption.sequence, caption.translatedText]);
+    const update = composerRef.current.ingest(next);
+    if (update.added) scheduleComposerFlush(update.phraseEnded);
+  }, [caption.sequence, caption.status, caption.translatedText, scheduleComposerFlush]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
 
-    if (!rollingText) {
+    if (!lines.length) {
       cancelScrolling();
       viewport.scrollTop = 0;
       return;
@@ -231,23 +265,47 @@ export function CaptionDisplay({
     if (target <= latestScrollTargetRef.current + 0.5) return;
     latestScrollTargetRef.current = target;
     scrollOneLine();
-  }, [cancelScrolling, rollingText, scrollOneLine]);
+  }, [cancelScrolling, lines, scrollOneLine]);
 
   useEffect(
     () => () => {
+      if (phraseTimerRef.current !== null) {
+        window.clearTimeout(phraseTimerRef.current);
+      }
       cancelScrolling();
     },
     [cancelScrolling],
   );
 
-  const shown = caption.visible && Boolean(rollingText.trim());
+  const shown = caption.visible && lines.length > 0;
+  const activeIndex = lines.length - 1;
 
   return (
     <main className={`display-canvas ${preview ? "preview" : ""}`}>
       <div className={`caption-panel ${shown ? "" : "hidden"}`} aria-live="polite">
         <div className="caption-viewport" ref={viewportRef}>
           <div className="caption-track">
-            <span className="caption-text">{rollingText || "\u00a0"}</span>
+            {lines.map((line, index) => {
+              const focus =
+                index === activeIndex
+                  ? "active"
+                  : index === activeIndex - 1
+                    ? "recent"
+                    : "history";
+              return (
+                <div
+                  className={`caption-line ${focus}`}
+                  data-committed={line.committed}
+                  key={line.id}
+                >
+                  {line.runs.map((run) => (
+                    <span className="caption-run" key={run.id}>
+                      {run.text}
+                    </span>
+                  ))}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

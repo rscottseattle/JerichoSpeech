@@ -127,6 +127,18 @@ function storeProPresenterSettings(nextSettings) {
   return settings.proPresenter;
 }
 
+function getCaptionCorrections() {
+  const value = loadSettings().captionCorrections;
+  return typeof value === "string" ? value.slice(0, 6000) : "";
+}
+
+function storeCaptionCorrections(value) {
+  const settings = loadSettings();
+  settings.captionCorrections = value.slice(0, 6000);
+  saveSettings(settings);
+  return settings.captionCorrections;
+}
+
 function presenterSignature(settings, caption) {
   return JSON.stringify([
     settings.host,
@@ -321,6 +333,30 @@ async function handleRequest(request, response) {
         }
         storeOpenAIKey(apiKey);
         json(response, 200, { configured: true });
+        return;
+      }
+      json(response, 405, { error: "Method not allowed." });
+      return;
+    }
+
+    if (url.pathname === "/api/settings/caption-corrections") {
+      if (request.method === "GET") {
+        json(response, 200, {
+          supported: true,
+          value: getCaptionCorrections(),
+        });
+        return;
+      }
+      if (request.method === "PUT") {
+        const body = await readJsonBody(request);
+        if (typeof body.value !== "string") {
+          json(response, 400, { error: "Terminology must be text." });
+          return;
+        }
+        json(response, 200, {
+          supported: true,
+          value: storeCaptionCorrections(body.value),
+        });
         return;
       }
       json(response, 405, { error: "Method not allowed." });

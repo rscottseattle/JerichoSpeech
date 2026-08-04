@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  applyCaptionCorrections,
+  drainCaptionCorrections,
+  parseCaptionCorrections,
+  type CaptionCorrection,
+} from "../lib/caption-corrections";
 
 type RunState = "idle" | "connecting" | "live";
 type PresenterConnectionState = "idle" | "testing" | "connected";
@@ -27,6 +33,11 @@ type PresenterMessage = {
   textTokens: string[];
 };
 
+type CorrectionSettings = {
+  supported: boolean;
+  value: string;
+};
+
 const rehearsalLines = [
   "Bienvenidos. Nos alegra mucho que estén aquí con nosotros esta mañana.",
   "Hoy vamos a hablar de la esperanza que encontramos en Jesús.",
@@ -34,7 +45,7 @@ const rehearsalLines = [
 ];
 
 const CAPTION_PUBLISH_INTERVAL_MS = 50;
-const PARTIAL_WORD_FLUSH_MS = 250;
+const PARTIAL_WORD_FLUSH_MS = 420;
 
 function captionWindow(value: string, includePartialWord = false) {
   let clean = value.replace(/\s+/g, " ").trim();
@@ -73,6 +84,12 @@ export function OperatorConsole() {
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [apiKeySaving, setApiKeySaving] = useState(false);
   const [apiKeyError, setApiKeyError] = useState("");
+  const [correctionSettings, setCorrectionSettings] =
+    useState<CorrectionSettings | null>(null);
+  const [correctionDraft, setCorrectionDraft] = useState("");
+  const [correctionSaving, setCorrectionSaving] = useState(false);
+  const [correctionSaved, setCorrectionSaved] = useState(false);
+  const [correctionError, setCorrectionError] = useState("");
   const [presenterSettings, setPresenterSettings] =
     useState<PresenterSettings | null>(null);
   const [presenterMessages, setPresenterMessages] = useState<PresenterMessage[]>([]);
@@ -88,10 +105,12 @@ export function OperatorConsole() {
   const meterFrameRef = useRef<number | null>(null);
   const publishTimerRef = useRef<number | null>(null);
   const partialFlushTimerRef = useRef<number | null>(null);
-  const clearTimerRef = useRef<number | null>(null);
   const demoTimerRef = useRef<number | null>(null);
   const sourceRef = useRef("");
   const translationRef = useRef("");
+  const correctionBufferRef = useRef("");
+  const correctionEntriesRef = useRef<CaptionCorrection[]>([]);
+  const captionRef = useRef("");
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -116,6 +135,18 @@ export function OperatorConsole() {
         // Direct ProPresenter output is available only in the installed Mac app.
       });
 
+    void fetch("/api/settings/caption-corrections", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as CorrectionSettings;
+        if (!active || !payload.supported) return;
+        setCorrectionSettings(payload);
+        setCorrectionDraft(payload.value);
+        correctionEntriesRef.current = parseCaptionCorrections(payload.value);
+      })
+      .catch(() => {
+        // Preferred terminology is stored by the installed Mac app.
+      });
+
     return () => {
       active = false;
       stopEverything(false);
@@ -135,8 +166,7 @@ export function OperatorConsole() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sourceText: overrides?.sourceText ?? sourceRef.current,
-        translatedText:
-          overrides?.translatedText ?? captionWindow(translationRef.current),
+        translatedText: overrides?.translatedText ?? captionRef.current,
         visible: overrides?.visible ?? visible,
         status: overrides?.status ?? runState,
       }),
@@ -145,6 +175,21 @@ export function OperatorConsole() {
     if (!response.ok) {
       throw new Error("The overhead display could not be updated.");
     }
+  }
+
+  function releaseCorrectedTranslation(force = false) {
+    const result = drainCaptionCorrections(
+      correctionBufferRef.current,
+      correctionEntriesRef.current,
+      force,
+    );
+    correctionBufferRef.current = result.pending;
+    if (!result.emitted) return false;
+
+    translationRef.current += result.emitted;
+    captionRef.current = captionWindow(translationRef.current, force);
+    setTranslatedText(captionRef.current);
+    return true;
   }
 
   function schedulePublish() {
@@ -170,11 +215,10 @@ export function OperatorConsole() {
 
     partialFlushTimerRef.current = window.setTimeout(async () => {
       partialFlushTimerRef.current = null;
-      const completeCaption = captionWindow(translationRef.current, true);
-      setTranslatedText(completeCaption);
+      if (!releaseCorrectedTranslation(true)) return;
       try {
         await publishCaption({
-          translatedText: completeCaption,
+          translatedText: captionRef.current,
           status: "live",
         });
       } catch (publishError) {
@@ -185,19 +229,6 @@ export function OperatorConsole() {
         );
       }
     }, PARTIAL_WORD_FLUSH_MS);
-  }
-
-  function scheduleAutoClear() {
-    if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
-    clearTimerRef.current = window.setTimeout(async () => {
-      translationRef.current = "";
-      setTranslatedText("");
-      try {
-        await publishCaption({ translatedText: "" });
-      } catch {
-        // A later transcript update will retry the display connection.
-      }
-    }, 8000);
   }
 
   function beginMeter(stream: MediaStream) {
@@ -302,6 +333,8 @@ export function OperatorConsole() {
     setRunState("connecting");
     sourceRef.current = "";
     translationRef.current = "";
+    correctionBufferRef.current = "";
+    captionRef.current = "";
     setSourceText("");
     setTranslatedText("");
     setMicrophoneBlocked(false);
@@ -355,12 +388,9 @@ export function OperatorConsole() {
         };
 
         if (event.type === "session.output_transcript.delta" && event.delta) {
-          translationRef.current += event.delta;
-          const nextCaption = captionWindow(translationRef.current);
-          setTranslatedText(nextCaption);
-          schedulePublish();
+          correctionBufferRef.current += event.delta;
+          if (releaseCorrectedTranslation()) schedulePublish();
           schedulePartialWordFlush();
-          scheduleAutoClear();
         }
 
         if (event.type === "session.input_transcript.delta" && event.delta) {
@@ -407,7 +437,6 @@ export function OperatorConsole() {
     if (partialFlushTimerRef.current) {
       window.clearTimeout(partialFlushTimerRef.current);
     }
-    if (clearTimerRef.current) window.clearTimeout(clearTimerRef.current);
     if (demoTimerRef.current) window.clearInterval(demoTimerRef.current);
     if (peerRef.current) {
       peerRef.current.onconnectionstatechange = null;
@@ -422,18 +451,36 @@ export function OperatorConsole() {
     setLevel(0);
     setRunState("idle");
     setDemoRunning(false);
-    if (updateDisplay) void publishCaption({ status: "idle" });
+    if (updateDisplay) {
+      sourceRef.current = "";
+      translationRef.current = "";
+      correctionBufferRef.current = "";
+      captionRef.current = "";
+      setSourceText("");
+      setTranslatedText("");
+      void publishCaption({
+        sourceText: "",
+        translatedText: "",
+        status: "idle",
+      });
+    }
   }
 
   async function sendManualCaption(text = manualText) {
     setError("");
-    translationRef.current = text.trim();
+    const corrected = applyCaptionCorrections(
+      text.trim(),
+      correctionEntriesRef.current,
+    );
+    translationRef.current = corrected;
+    correctionBufferRef.current = "";
+    captionRef.current = corrected;
     sourceRef.current = "Manual rehearsal caption";
-    setTranslatedText(text.trim());
+    setTranslatedText(corrected);
     setSourceText("Manual rehearsal caption");
     try {
       await publishCaption({
-        translatedText: text.trim(),
+        translatedText: corrected,
         sourceText: "Manual rehearsal caption",
         visible: true,
         status: "rehearsal",
@@ -479,8 +526,10 @@ export function OperatorConsole() {
 
   async function clearCaption() {
     translationRef.current = "";
+    correctionBufferRef.current = "";
+    captionRef.current = "";
     setTranslatedText("");
-    await publishCaption({ translatedText: "" });
+    await publishCaption({ translatedText: "", status: "clear" });
   }
 
   function fullDisplayUrl() {
@@ -518,6 +567,51 @@ export function OperatorConsole() {
       );
     } finally {
       setApiKeySaving(false);
+    }
+  }
+
+  async function saveCaptionCorrections() {
+    if (!correctionSettings) return;
+    setCorrectionError("");
+    setCorrectionSaved(false);
+
+    const invalidLine = correctionDraft
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .find((line) => line && !line.includes("=") && !line.includes("→"));
+    if (invalidLine) {
+      setCorrectionError(
+        "Use one replacement per line in this form: current wording = preferred wording.",
+      );
+      return;
+    }
+
+    setCorrectionSaving(true);
+    try {
+      const response = await fetch("/api/settings/caption-corrections", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: correctionDraft }),
+      });
+      const payload = (await response.json()) as CorrectionSettings & {
+        error?: string;
+      };
+      if (!response.ok || !payload.supported) {
+        throw new Error(payload.error || "Preferred terminology could not be saved.");
+      }
+
+      setCorrectionSettings(payload);
+      setCorrectionDraft(payload.value);
+      correctionEntriesRef.current = parseCaptionCorrections(payload.value);
+      setCorrectionSaved(true);
+    } catch (saveError) {
+      setCorrectionError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Preferred terminology could not be saved.",
+      );
+    } finally {
+      setCorrectionSaving(false);
     }
   }
 
@@ -791,6 +885,47 @@ export function OperatorConsole() {
               </div>
             </div>
           </div>
+
+          {correctionSettings ? (
+            <div className="card">
+              <div className="card-header">
+                <h2 className="card-title">Preferred terminology</h2>
+                <span className="card-kicker">
+                  {correctionSaved ? "Saved" : "Local correction layer"}
+                </span>
+              </div>
+              <div className="card-body">
+                <label className="field-label" htmlFor="caption-corrections">
+                  Current translation = preferred caption
+                </label>
+                <textarea
+                  id="caption-corrections"
+                  className="textarea terminology-textarea"
+                  value={correctionDraft}
+                  onChange={(event) => {
+                    setCorrectionDraft(event.target.value);
+                    setCorrectionSaved(false);
+                  }}
+                  placeholder={"Jesús Cristo = Jesucristo\nRevelaciones = Apocalipsis"}
+                />
+                <p className="helper">
+                  Add one exact replacement per line for names, church language,
+                  Bible books, and recurring local terms. Changes apply to future
+                  captions without rewriting words already shown.
+                </p>
+                <button
+                  className="button primary"
+                  disabled={correctionSaving}
+                  onClick={saveCaptionCorrections}
+                >
+                  {correctionSaving ? "Saving…" : "Save terminology"}
+                </button>
+                {correctionError ? (
+                  <p className="error-note">{correctionError}</p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           <div className="card">
             <div className="card-header">

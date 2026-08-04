@@ -272,6 +272,12 @@ a {
   line-height: 1.45;
 }
 
+.terminology-textarea {
+  min-height: 132px;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 13px;
+}
+
 .control:focus,
 .textarea:focus {
   border-color: var(--gold-deep);
@@ -546,13 +552,27 @@ a {
   justify-content: flex-end;
 }
 
-.caption-text {
+.caption-line {
   width: 100%;
+  height: 1.2em;
   flex: none;
   display: block;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-  text-wrap: wrap;
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 0.8;
+  transition: opacity 180ms ease;
+}
+
+.caption-line.recent {
+  opacity: 0.9;
+}
+
+.caption-line.active {
+  opacity: 1;
+}
+
+.caption-run {
+  animation: caption-phrase-arrival 110ms ease-out both;
 }
 
 .caption-panel.hidden {
@@ -562,6 +582,20 @@ a {
 
 @keyframes pulse {
   50% { opacity: 0.38; }
+}
+
+@keyframes caption-phrase-arrival {
+  from { opacity: 0.72; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caption-panel,
+  .caption-line,
+  .caption-run {
+    animation: none;
+    transition: none;
+  }
 }
 
 @media (max-width: 920px) {

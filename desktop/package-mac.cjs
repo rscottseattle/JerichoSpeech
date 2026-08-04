@@ -81,7 +81,6 @@ try {
     }
   );
 
-  fs.rmSync(outputDir, { recursive: true, force: true });
   fs.mkdirSync(outputDir, { recursive: true });
 
   const artifacts = fs

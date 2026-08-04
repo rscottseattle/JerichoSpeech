@@ -3,7 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("build contains the JerichoSpeech overhead-caption workflow", async () => {
-  const [layout, operator, display, captionApi, realtimeApi, settingsApi, presenterSettingsApi, desktop, presenter, entitlements, styles] =
+  const [layout, operator, display, composer, corrections, captionApi, realtimeApi, settingsApi, correctionSettingsApi, presenterSettingsApi, desktop, presenter, entitlements, styles] =
     await Promise.all([
       readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
       readFile(
@@ -14,6 +14,8 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
         new URL("../app/components/CaptionDisplay.tsx", import.meta.url),
         "utf8",
       ),
+      readFile(new URL("../app/lib/caption-composer.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/lib/caption-corrections.ts", import.meta.url), "utf8"),
       readFile(
         new URL(
           "../app/api/channels/[channel]/caption/route.ts",
@@ -27,6 +29,10 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
       ),
       readFile(
         new URL("../app/api/settings/openai-key/route.ts", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/api/settings/caption-corrections/route.ts", import.meta.url),
         "utf8",
       ),
       readFile(
@@ -49,10 +55,11 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
   assert.match(display, /setTimeout\(refresh, 75\)/);
   assert.match(display, /next\.sequence < current\.sequence/);
   assert.match(operator, /CAPTION_PUBLISH_INTERVAL_MS = 50/);
-  assert.match(operator, /PARTIAL_WORD_FLUSH_MS = 250/);
+  assert.match(operator, /PARTIAL_WORD_FLUSH_MS = 420/);
   assert.match(captionApi, /liveChannels/);
   assert.match(realtimeApi, /gpt-realtime-translate/);
   assert.match(settingsApi, /configured/);
+  assert.match(correctionSettingsApi, /supported: false/);
   assert.match(presenterSettingsApi, /supported: false/);
   assert.match(desktop, /safeStorage\s*\.\s*encryptString/);
   assert.match(desktop, /systemPreferences\.askForMediaAccess\("microphone"\)/);
@@ -73,8 +80,13 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
   assert.match(styles, /font-family:\s*"Avenir Next"/);
   assert.match(styles, /font-size:\s*clamp\(22px, 2\.6vw, 50px\)/);
   assert.match(styles, /font-weight:\s*600/);
-  assert.match(display, /appendedCaptionText/);
-  assert.match(display, /return ` \$\{next\}`/);
+  assert.match(display, /CaptionComposer/);
+  assert.match(composer, /appendedCaptionText/);
+  assert.match(composer, /SENTENCE_END/);
+  assert.match(composer, /CONNECTOR_WORDS/);
+  assert.match(corrections, /drainCaptionCorrections/);
+  assert.match(operator, /Preferred terminology/);
+  assert.doesNotMatch(operator, /scheduleAutoClear/);
   assert.match(display, /SCROLL_DURATION_MS = 680/);
   assert.match(display, /scrollOneLine/);
 
