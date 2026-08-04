@@ -32,7 +32,7 @@
 - The display opens without browser chrome or a visible page background.
 - Captions remain within three lines at normal 1080p output and never display a fourth line.
 - Completed lines remain fixed while new words build from left to right on the bottom line.
-- When a new row begins, the caption viewport glides upward by one line and then stops.
+- When a new row begins, the caption viewport glides upward by exactly one line and then stops before any later row advances.
 - Show, hide, and clear react in under one second on the same computer.
 - Low-latency relay publishes completed words about every 50 milliseconds and refreshes the display every 75 milliseconds.
 - A brief connection interruption does not immediately erase the last caption.

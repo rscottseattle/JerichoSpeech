@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 type CaptionState = {
   translatedText: string;
@@ -8,7 +14,8 @@ type CaptionState = {
   sequence: number;
 };
 
-const SCROLL_DURATION_MS = 520;
+const SCROLL_DURATION_MS = 680;
+const SCROLL_HOLD_MS = 120;
 const MIN_SLIDING_OVERLAP = 16;
 
 function cleanCaptionText(value: string) {
@@ -35,6 +42,12 @@ function appendedCaptionText(previous: string, next: string) {
   return `\n${next}`;
 }
 
+function easeInOutCubic(progress: number) {
+  return progress < 0.5
+    ? 4 * progress * progress * progress
+    : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+}
+
 export function CaptionDisplay({
   channel,
   preview,
@@ -51,8 +64,91 @@ export function CaptionDisplay({
   const previousCaptionRef = useRef("");
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
-  const lastScrollTargetRef = useRef(0);
+  const scrollHoldRef = useRef<number | null>(null);
+  const scrollOneLineRef = useRef<() => void>(() => {});
+  const latestScrollTargetRef = useRef(0);
+  const scrollingRef = useRef(false);
   const positionedRef = useRef(false);
+
+  const cancelScrolling = useCallback(() => {
+    if (scrollFrameRef.current) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+      scrollFrameRef.current = null;
+    }
+    if (scrollHoldRef.current) {
+      window.clearTimeout(scrollHoldRef.current);
+      scrollHoldRef.current = null;
+    }
+    scrollingRef.current = false;
+  }, []);
+
+  const scrollOneLine = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || scrollingRef.current) return;
+
+    const remaining = latestScrollTargetRef.current - viewport.scrollTop;
+    if (remaining <= 0.5) {
+      viewport.scrollTop = latestScrollTargetRef.current;
+      return;
+    }
+
+    const computedLineHeight = Number.parseFloat(
+      window.getComputedStyle(viewport).lineHeight,
+    );
+    const lineHeight = Number.isFinite(computedLineHeight)
+      ? computedLineHeight
+      : viewport.clientHeight / 3;
+    const distance = Math.min(lineHeight, remaining);
+    scrollingRef.current = true;
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      viewport.scrollTop += distance;
+      if (latestScrollTargetRef.current - viewport.scrollTop > 0.5) {
+        scrollHoldRef.current = window.setTimeout(() => {
+          scrollHoldRef.current = null;
+          scrollingRef.current = false;
+          scrollOneLineRef.current();
+        }, SCROLL_HOLD_MS);
+      } else {
+        scrollingRef.current = false;
+      }
+      return;
+    }
+
+    const start = viewport.scrollTop;
+    const destination = start + distance;
+    const startedAt = performance.now();
+
+    const advance = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / SCROLL_DURATION_MS);
+      viewport.scrollTop =
+        start + distance * easeInOutCubic(progress);
+
+      if (progress < 1) {
+        scrollFrameRef.current = window.requestAnimationFrame(advance);
+        return;
+      }
+
+      viewport.scrollTop = destination;
+      scrollFrameRef.current = null;
+
+      if (latestScrollTargetRef.current - destination > 0.5) {
+        scrollHoldRef.current = window.setTimeout(() => {
+          scrollHoldRef.current = null;
+          scrollingRef.current = false;
+          scrollOneLineRef.current();
+        }, SCROLL_HOLD_MS);
+      } else {
+        scrollingRef.current = false;
+      }
+    };
+
+    scrollFrameRef.current = window.requestAnimationFrame(advance);
+  }, []);
+
+  useLayoutEffect(() => {
+    scrollOneLineRef.current = scrollOneLine;
+  }, [scrollOneLine]);
 
   useEffect(() => {
     let active = true;
@@ -91,7 +187,7 @@ export function CaptionDisplay({
     if (!next) {
       previousCaptionRef.current = "";
       positionedRef.current = false;
-      lastScrollTargetRef.current = 0;
+      latestScrollTargetRef.current = 0;
       setRollingText("");
       return;
     }
@@ -106,10 +202,7 @@ export function CaptionDisplay({
     if (!viewport) return;
 
     if (!rollingText) {
-      if (scrollFrameRef.current) {
-        window.cancelAnimationFrame(scrollFrameRef.current);
-        scrollFrameRef.current = null;
-      }
+      cancelScrolling();
       viewport.scrollTop = 0;
       return;
     }
@@ -117,50 +210,28 @@ export function CaptionDisplay({
     const target = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
     if (!positionedRef.current) {
       viewport.scrollTop = target;
-      lastScrollTargetRef.current = target;
+      latestScrollTargetRef.current = target;
       positionedRef.current = true;
       return;
     }
 
-    if (target <= lastScrollTargetRef.current + 0.5) return;
-    lastScrollTargetRef.current = target;
-
-    if (scrollFrameRef.current) {
-      window.cancelAnimationFrame(scrollFrameRef.current);
-    }
-
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (target < latestScrollTargetRef.current - 0.5) {
+      cancelScrolling();
       viewport.scrollTop = target;
-      scrollFrameRef.current = null;
+      latestScrollTargetRef.current = target;
       return;
     }
 
-    const start = viewport.scrollTop;
-    const distance = target - start;
-    const startedAt = performance.now();
-
-    const advance = (now: number) => {
-      const progress = Math.min(1, (now - startedAt) / SCROLL_DURATION_MS);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      viewport.scrollTop = start + distance * eased;
-
-      if (progress < 1) {
-        scrollFrameRef.current = window.requestAnimationFrame(advance);
-      } else {
-        scrollFrameRef.current = null;
-      }
-    };
-
-    scrollFrameRef.current = window.requestAnimationFrame(advance);
-  }, [rollingText]);
+    if (target <= latestScrollTargetRef.current + 0.5) return;
+    latestScrollTargetRef.current = target;
+    scrollOneLine();
+  }, [cancelScrolling, rollingText, scrollOneLine]);
 
   useEffect(
     () => () => {
-      if (scrollFrameRef.current) {
-        window.cancelAnimationFrame(scrollFrameRef.current);
-      }
+      cancelScrolling();
     },
-    [],
+    [cancelScrolling],
   );
 
   const shown = caption.visible && Boolean(rollingText.trim());
