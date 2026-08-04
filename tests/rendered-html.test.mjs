@@ -46,7 +46,8 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
   assert.match(operator, /Start live translation/);
   assert.match(operator, /Rehearsal mode/);
   assert.match(operator, /\/display\/main/);
-  assert.match(display, /setInterval\(refresh, 75\)/);
+  assert.match(display, /setTimeout\(refresh, 75\)/);
+  assert.match(display, /next\.sequence < current\.sequence/);
   assert.match(operator, /CAPTION_PUBLISH_INTERVAL_MS = 50/);
   assert.match(operator, /PARTIAL_WORD_FLUSH_MS = 250/);
   assert.match(captionApi, /liveChannels/);
@@ -70,6 +71,7 @@ test("build contains the JerichoSpeech overhead-caption workflow", async () => {
   assert.match(styles, /\.caption-panel\s*\{[^}]*text-align:\s*left/s);
   assert.match(styles, /font-size:\s*clamp\(22px, 2\.6vw, 50px\)/);
   assert.match(display, /appendedCaptionText/);
+  assert.match(display, /return ` \$\{next\}`/);
   assert.match(display, /SCROLL_DURATION_MS = 680/);
   assert.match(display, /scrollOneLine/);
 

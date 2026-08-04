@@ -38,8 +38,9 @@ function appendedCaptionText(previous: string, next: string) {
     }
   }
 
-  // Manual captions and fresh translation segments begin on a stable new row.
-  return `\n${next}`;
+  // A missed polling window must not create an artificial visual line break.
+  // The browser's measured width is the only thing allowed to finish a row.
+  return ` ${next}`;
 }
 
 function easeInOutCubic(progress: number) {
@@ -152,6 +153,7 @@ export function CaptionDisplay({
 
   useEffect(() => {
     let active = true;
+    let timer: number | null = null;
 
     const refresh = async () => {
       try {
@@ -160,24 +162,28 @@ export function CaptionDisplay({
         });
         if (response.ok && active) {
           const next = (await response.json()) as CaptionState;
-          setCaption((current) =>
-            current.sequence === next.sequence &&
-            current.translatedText === next.translatedText &&
-            current.visible === next.visible
+          setCaption((current) => {
+            if (next.sequence < current.sequence) return current;
+            return current.sequence === next.sequence &&
+              current.translatedText === next.translatedText &&
+              current.visible === next.visible
               ? current
-              : next,
-          );
+              : next;
+          });
         }
       } catch {
         // Keep the most recent caption on screen during a brief network interruption.
+      } finally {
+        // Wait for this request to finish before polling again so responses
+        // cannot arrive out of order and masquerade as a new caption segment.
+        if (active) timer = window.setTimeout(refresh, 75);
       }
     };
 
     void refresh();
-    const timer = window.setInterval(refresh, 75);
     return () => {
       active = false;
-      window.clearInterval(timer);
+      if (timer !== null) window.clearTimeout(timer);
     };
   }, [channel]);
 
